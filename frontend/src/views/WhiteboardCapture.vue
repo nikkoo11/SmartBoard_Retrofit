@@ -35,6 +35,7 @@ const ocrMs = ref({})
 const ocrCropped = ref({})
 const ocrWordsDropped = ref({})
 const ocrLinesDropped = ref({})
+const ocrEngine = ref({})
 const finalizing = ref(false)
 const finalizeMsg = ref('')
 
@@ -87,6 +88,7 @@ async function fetchCaptures(id) {
         if (ocrCrop.value[c.id] === undefined) ocrCrop.value[c.id] = true
         if (ocrMinConf.value[c.id] === undefined) ocrMinConf.value[c.id] = 0
         if (ocrFilter.value[c.id] === undefined) ocrFilter.value[c.id] = 'line'
+        if (!ocrEngine.value[c.id]) ocrEngine.value[c.id] = 'tesseract'
       })
     } else {
       captures.value = []
@@ -164,12 +166,17 @@ async function runOcr(c) {
   ocrWordsDropped.value[c.id] = null
   ocrLinesDropped.value[c.id] = null
   try {
-    const src = ocrSource.value[c.id] || 'threshold'
+    const engine = ocrEngine.value[c.id] || 'tesseract'
+    let src = ocrSource.value[c.id] || 'threshold'
+    if (engine === 'gemini' && src === 'threshold') {
+      src = 'original'
+      ocrSource.value[c.id] = src
+    }
     const psm = ocrPsm.value[c.id] || 6
     const crop = ocrCrop.value[c.id] ? 1 : 0
     const minConf = ocrMinConf.value[c.id] || 0
     const filt = ocrFilter.value[c.id] || 'line'
-    const res = await fetch(API_BASE + '/captures/' + c.id + '/ocr/?source=' + src + '&psm=' + psm + '&crop=' + crop + '&min_conf=' + minConf + '&filter=' + filt + '&save=0', { method: 'POST' })
+    const res = await fetch(API_BASE + '/captures/' + c.id + '/ocr/?engine=' + engine + '&source=' + src + '&psm=' + psm + '&crop=' + crop + '&min_conf=' + minConf + '&filter=' + filt + '&save=0', { method: 'POST' })
     if (!res.ok) {
       let detail = 'Cannot reach the backend'
       try { const d = await res.json(); if (d.detail) detail = d.detail } catch (e) {}
@@ -361,15 +368,20 @@ onMounted(async () => {
           <div v-if="c.clean_ms != null" class="text-xs text-slate-400 mb-2">Cleaning time: {{ c.clean_ms }} ms</div>
           <div v-if="cleanMsg[c.id]" class="text-xs text-green-400 mb-2">{{ cleanMsg[c.id] }}</div>
           <div v-if="cleanError[c.id]" class="text-xs text-red-400 mb-2">{{ cleanError[c.id] }}</div>
-          <div class="mb-2">
+<div class="mb-2">
             <label class="block text-xs text-slate-400 mb-1">OCR results are a draft and may contain mistakes, especially for handwriting. Please review and edit before saving.</label>
             <div class="flex flex-wrap items-center gap-2 mb-2">
+              <select v-model="ocrEngine[c.id]" class="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 text-sm">
+                <option value="tesseract">Tesseract</option>
+                <option value="gemini">Gemini</option>
+              </select>
+              <div v-if="ocrEngine[c.id] === 'gemini'" class="text-xs text-cyan-400">Gemini selected</div>
               <select v-model="ocrSource[c.id]" class="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 text-sm">
                 <option value="original">Original</option>
                 <option value="cleaned">Cleaned</option>
-                <option value="threshold">OCR-optimized (threshold)</option>
+                <option value="threshold" :disabled="ocrEngine[c.id] === 'gemini'">OCR-optimized (threshold)</option>
               </select>
-              <select v-model="ocrPsm[c.id]" class="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 text-sm">
+              <select v-model="ocrPsm[c.id]" :disabled="ocrEngine[c.id] === 'gemini'" class="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 text-sm disabled:opacity-50">
                 <option :value="6">Single block (6)</option>
                 <option :value="11">Sparse text (11)</option>
                 <option :value="3">Auto (3)</option>
@@ -378,12 +390,12 @@ onMounted(async () => {
             </div>
             <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 text-xs text-slate-300">
               <label class="flex items-center gap-1">
-                <input type="checkbox" v-model="ocrCrop[c.id]" class="accent-cyan-400" />
+                <input type="checkbox" v-model="ocrCrop[c.id]" :disabled="ocrEngine[c.id] === 'gemini'" class="accent-cyan-400 disabled:opacity-50" />
                 Crop to the page/board first
               </label>
               <label class="flex items-center gap-2">
                 Noise filter:
-                <select v-model.number="ocrMinConf[c.id]" class="px-1 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200">
+                <select v-model.number="ocrMinConf[c.id]" :disabled="ocrEngine[c.id] === 'gemini'" class="px-1 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 disabled:opacity-50">
                   <option :value="0">Off</option>
                   <option :value="30">Light (30)</option>
                   <option :value="40">Medium (40)</option>
@@ -391,19 +403,19 @@ onMounted(async () => {
               </label>
               <label class="flex items-center gap-2">
                 Filter type:
-                <select v-model="ocrFilter[c.id]" class="px-1 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200">
+                <select v-model="ocrFilter[c.id]" :disabled="ocrEngine[c.id] === 'gemini'" class="px-1 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 disabled:opacity-50">
                   <option value="line">Whole lines</option>
                   <option value="word">Single words</option>
                 </select>
               </label>
             </div>
             <div v-if="ocrMsg[c.id]" class="text-xs text-green-400 mb-1">{{ ocrMsg[c.id] }}</div>
-            <div v-if="ocrCropped[c.id] === true" class="text-xs text-slate-400 mb-1">Cropped: yes</div>
-            <div v-else-if="ocrCropped[c.id] === false" class="text-xs text-yellow-400 mb-1">Cropped: no — Page not found, used the full photo.</div>
+            <div v-if="ocrEngine[c.id] !== 'gemini' && ocrCropped[c.id] === true" class="text-xs text-slate-400 mb-1">Cropped: yes</div>
+            <div v-if="ocrEngine[c.id] !== 'gemini' && ocrCropped[c.id] === false" class="text-xs text-yellow-400 mb-1">Cropped: no — Page not found, used the full photo.</div>
             <div v-if="ocrWordsDropped[c.id] != null && ocrWordsDropped[c.id] > 0" class="text-xs text-slate-400 mb-1">Words removed: {{ ocrWordsDropped[c.id] }}</div>
             <div v-if="ocrLinesDropped[c.id] != null && ocrLinesDropped[c.id] > 0" class="text-xs text-slate-400 mb-1">Lines removed: {{ ocrLinesDropped[c.id] }}</div>
-            <div v-if="ocrConfidence[c.id] != null" class="text-xs text-slate-400 mb-1">Tesseract confidence: {{ ocrConfidence[c.id] }}%</div>
-            <div v-if="ocrMs[c.id] != null" class="text-xs text-slate-400 mb-1">Time: {{ ocrMs[c.id] }} ms</div>
+            <div v-if="typeof ocrConfidence[c.id] === 'number'" class="text-xs text-slate-400 mb-1">{{ ocrEngine[c.id] === 'gemini' ? 'Gemini' : 'Tesseract' }} confidence: {{ ocrConfidence[c.id] }}%</div>
+            <div v-if="typeof ocrMs[c.id] === 'number'" class="text-xs text-slate-400 mb-1">Time: {{ ocrMs[c.id] }} ms</div>
             <div class="text-xs text-slate-500 mb-1">OCR is a draft. Remove or fix wrong lines before saving.</div>
             <div v-if="ocrErr[c.id]" class="text-xs text-red-400 mb-1">{{ ocrErr[c.id] }}</div>
             <textarea v-model="extractedDrafts[c.id]" class="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 h-24"></textarea>
