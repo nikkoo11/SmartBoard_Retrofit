@@ -149,15 +149,41 @@ async function finalizeSession() {
   if (!confirm('Finalize this session?')) return
   finalizing.value = true
   finalizeMsg.value = ''
+  uploadError.value = ''
   try {
-    const res = await fetch(API_BASE + '/sessions/' + selectedSession.value + '/', {
+    const genRes = await fetch(API_BASE + '/sessions/' + selectedSession.value + '/generate-pdf/', {
+      method: 'POST'
+    })
+    if (genRes.status === 400) {
+      try {
+        const data = await genRes.json()
+        uploadError.value = data.detail || 'Failed to generate PDF'
+      } catch (e) {
+        uploadError.value = 'Failed to generate PDF'
+      }
+      return
+    }
+    if (!(genRes.ok || genRes.status === 201)) {
+      uploadError.value = 'Failed to generate PDF'
+      return
+    }
+    const pdfData = await genRes.json()
+    const patchRes = await fetch(API_BASE + '/sessions/' + selectedSession.value + '/', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'finalized' })
     })
-    if (!res.ok) throw new Error('Failed')
-    finalizeMsg.value = 'Session marked as finalized. PDF generation is not connected yet, so no PDF was created.'
+    if (!patchRes.ok) {
+      uploadError.value = 'Failed to finalize session'
+      return
+    }
     await fetchSessionObj(selectedSession.value)
+    let msg = 'Session finalized and PDF created. '
+    if (pdfData && pdfData.file) {
+      msg += '<a href="' + pdfData.file + '" target="_blank" class="underline">View PDF</a> '
+    }
+    msg += '<a href="/archive" class="underline">Go to Archive</a>'
+    finalizeMsg.value = msg
   } catch (e) {
     uploadError.value = 'Failed to finalize session'
   } finally {
@@ -220,7 +246,7 @@ onMounted(async () => {
         </div>
         <button @click="upload" :disabled="!file || uploading" class="px-3 py-2 bg-cyan-400 text-black rounded disabled:opacity-50">{{ uploading ? 'Uploading...' : 'Upload' }}</button>
         <div v-if="uploadError" class="mt-2 text-red-400 text-sm">{{ uploadError }}</div>
-        <div v-if="finalizeMsg" class="mt-2 text-green-400 text-sm">{{ finalizeMsg }}</div>
+        <div v-if="finalizeMsg" class="mt-2 text-green-400 text-sm" v-html="finalizeMsg"></div>
       </div>
     </div>
 
