@@ -158,6 +158,84 @@ def clean_for_ocr(input_path, output_path=None):
     return th
 
 
+def find_text_region(image):
+    try:
+        if image is None:
+            return image, None
+        if image.ndim == 2:
+            gray = image
+            color = None
+        else:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            color = image
+        h, w = gray.shape[:2]
+        total = h * w
+        # First try: largest bright connected region (Otsu, morphological close)
+        try:
+            _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+            closed = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel)
+            contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            min_area = 0.20 * total
+            best = None
+            best_area = 0
+            for cnt in contours:
+                a = cv2.contourArea(cnt)
+                if a >= min_area and a > best_area:
+                    best = cnt
+                    best_area = a
+            if best is not None:
+                x, y, bw, bh = cv2.boundingRect(best)
+                m = 12
+                x0 = max(0, x - m)
+                y0 = max(0, y - m)
+                x1 = min(w, x + bw + m)
+                y1 = min(h, y + bh + m)
+                if x1 - x0 > 20 and y1 - y0 > 20:
+                    cropped = image[y0:y1, x0:x1] if image.ndim == 3 else image[y0:y1, x0:x1]
+                    return cropped, (x0, y0, x1 - x0, y1 - y0)
+        except Exception:
+            pass
+        # Fallback: bounding box of dark text pixels
+        try:
+            th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 15)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 5))
+            dil = cv2.dilate(th, kernel, iterations=1)
+            contours, _ = cv2.findContours(dil, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            min_area = 0.001 * total
+            xs, ys, xe, ye = [], [], [], []
+            for cnt in contours:
+                if cv2.contourArea(cnt) >= min_area:
+                    x, y, bw, bh = cv2.boundingRect(cnt)
+                    xs.append(x); ys.append(y); xe.append(x + bw); ye.append(y + bh)
+            if xs:
+                x0 = max(0, min(xs) - 12)
+                y0 = max(0, min(ys) - 12)
+                x1 = min(w, max(xe) + 12)
+                y1 = min(h, max(ye) + 12)
+                if x1 - x0 > 20 and y1 - y0 > 20:
+                    cropped = image[y0:y1, x0:x1]
+                    return cropped, (x0, y0, x1 - x0, y1 - y0)
+        except Exception:
+            pass
+        return image, None
+    except Exception:
+        return image, None
+    image = _read_image(input_path)
+    image = _resize(image)
+    image, cropped, crop_note = find_and_warp_document(image)
+    gray = _to_grayscale(image)
+    gray = _remove_lighting(gray)
+    gray = _darken_strokes(gray, strength)
+    gray = _white_point(gray)
+    gray = _gamma(gray, 0.9)
+    gray = _unsharp_mask(gray)
+    if output_path:
+        ok = cv2.imwrite(output_path, gray)
+        if not ok:
+            raise ValueError('Could not write cleaned image: %s' % output_path)
+    return {'cropped': bool(cropped), 'crop_note': crop_note}
+
 def clean_board_image(input_path, output_path=None, strength=0.5):
     image = _read_image(input_path)
     image = _resize(image)

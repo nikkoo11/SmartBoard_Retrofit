@@ -11,7 +11,7 @@ from .models import Course, LessonSession, Capture, PdfDocument
 from .serializers import CourseSerializer, LessonSessionSerializer, CaptureSerializer, PdfDocumentSerializer
 from .pdf_service import build_session_pdf
 from .ocr_service import run_ocr
-from .cleaning_service import clean_for_ocr, clean_board_image
+from .cleaning_service import clean_for_ocr, clean_board_image, find_text_region
 
 
 class CourseViewSet(viewsets.ModelViewSet):
@@ -90,6 +90,15 @@ class CaptureViewSet(viewsets.ModelViewSet):
         source = request.query_params.get('source', None)
         psm = int(request.query_params.get('psm', 6))
         save = request.query_params.get('save', '0') == '1'
+        crop = request.query_params.get('crop', '0') == '1'
+        try:
+            min_conf = int(request.query_params.get('min_conf', 0))
+        except (TypeError, ValueError):
+            min_conf = 0
+        min_conf = max(0, min(90, min_conf))
+        filt = request.query_params.get('filter', 'line')
+        if filt not in ('word', 'line'):
+            return Response({'detail': 'Invalid filter.'}, status=status.HTTP_400_BAD_REQUEST)
         if psm not in (3, 4, 6, 11):
             return Response({'detail': 'Invalid psm.'}, status=status.HTTP_400_BAD_REQUEST)
         if not capture.image:
@@ -98,6 +107,7 @@ class CaptureViewSet(viewsets.ModelViewSet):
             source = 'cleaned' if (capture.cleaned_image and os.path.exists(capture.cleaned_image.path)) else 'original'
         if source not in ('original', 'cleaned', 'threshold'):
             return Response({'detail': 'Invalid source.'}, status=status.HTTP_400_BAD_REQUEST)
+        cropped = False
         try:
             if source == 'original':
                 img = cv2.imread(capture.image.path, cv2.IMREAD_GRAYSCALE)
@@ -111,17 +121,29 @@ class CaptureViewSet(viewsets.ModelViewSet):
                     raise ValueError('Cannot read image')
             else:
                 img = clean_for_ocr(capture.image.path)
+            if crop:
+                img, box = find_text_region(img)
+                cropped = box is not None
+                # upscale
+                try:
+                    h, w = img.shape[:2]
+                    if w < 2000:
+                        factor = min(3.0, 2000.0 / max(1, w))
+                        if factor > 1.0:
+                            img = cv2.resize(img, (int(w * factor), int(h * factor)), interpolation=cv2.INTER_CUBIC)
+                except Exception:
+                    pass
         except Exception as exc:
             return Response({'detail': 'Could not prepare image: %s' % exc}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         try:
-            result = run_ocr(img, psm=psm)
+            result = run_ocr(img, psm=psm, min_conf=min_conf, filter=filt)
         except Exception as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         if save and result['text'].strip():
             capture.extracted_text = result['text']
             capture.save()
         saved = bool(save and result['text'].strip())
-        payload = {'source': source, 'psm': psm, 'text': result['text'], 'confidence': result['confidence'], 'ms': result['ms'], 'saved': saved}
+        payload = {'source': source, 'psm': psm, 'filter': filt, 'text': result['text'], 'confidence': result['confidence'], 'ms': result['ms'], 'saved': saved, 'cropped': cropped, 'min_conf': min_conf, 'chars': len(result['text']), 'words_dropped': result.get('words_dropped', 0), 'lines_kept': result.get('lines_kept', 0), 'lines_dropped': result.get('lines_dropped', 0)}
         if not result['text'].strip():
             payload['detail'] = 'No text was detected.'
         return Response(payload, status=status.HTTP_200_OK)

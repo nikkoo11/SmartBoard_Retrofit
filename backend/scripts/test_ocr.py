@@ -6,7 +6,7 @@ import cv2
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from apps.core.ocr_service import run_ocr
-from apps.core.cleaning_service import clean_gentle, clean_strong, clean_for_ocr
+from apps.core.cleaning_service import clean_gentle, clean_strong, clean_for_ocr, find_text_region
 
 
 def levenshtein(a, b):
@@ -54,32 +54,50 @@ def main():
     rows = []
     for vname, fn in variants.items():
         img = fn()
-        for psm in (6, 11):
-            res = run_ocr(img, psm=psm)
-            text = res['text']
-            cer = None
-            if gt is not None:
-                cer = levenshtein(normalize(text), gt) / max(len(gt), 1)
-            out_file = os.path.join(output_dir, '%s_psm%d.txt' % (vname, psm))
-            with open(out_file, 'w', encoding='utf-8') as f:
-                f.write(text)
-            rows.append({
-                'variant': vname,
-                'psm': psm,
-                'ms': res['ms'],
-                'confidence': res['confidence'],
-                'chars': len(text),
-                'cer': cer,
-            })
-            print('%-10s psm=%d  ms=%d  conf=%s  chars=%d  cer=%s' % (
-                vname, psm, res['ms'],
-                (round(res['confidence'], 1) if res['confidence'] is not None else None),
-                len(text),
-                (round(cer, 4) if cer is not None else None),
-            ))
+        for crop in (0, 1):
+            base = img
+            if crop:
+                base, _ = find_text_region(base)
+                h, w = base.shape[:2]
+                if w < 2000:
+                    factor = min(3.0, 2000.0 / max(1, w))
+                    if factor > 1.0:
+                        base = cv2.resize(base, (int(w * factor), int(h * factor)), interpolation=cv2.INTER_CUBIC)
+            for filt in ('word', 'line'):
+                for min_conf in (40, 50, 60):
+                    for psm in (6, 11):
+                        res = run_ocr(base, psm=psm, min_conf=min_conf, filter=filt)
+                        text = res['text']
+                        cer = None
+                        if gt is not None:
+                            cer = levenshtein(normalize(text), gt) / max(len(gt), 1)
+                        out_file = os.path.join(output_dir, '%s_crop%d_%s_mc%d_psm%d.txt' % (vname, crop, filt, min_conf, psm))
+                        with open(out_file, 'w', encoding='utf-8') as f:
+                            f.write(text)
+                        rows.append({
+                            'variant': vname,
+                            'crop': crop,
+                            'filter': filt,
+                            'min_conf': min_conf,
+                            'psm': psm,
+                            'ms': res['ms'],
+                            'confidence': res['confidence'],
+                            'chars': len(text),
+                            'words_dropped': res.get('words_dropped', 0),
+                            'lines_kept': res.get('lines_kept', 0),
+                            'lines_dropped': res.get('lines_dropped', 0),
+                            'cer': cer,
+                        })
+                        print('%-10s crop=%d filter=%-5s mc=%d psm=%d ms=%d conf=%s chars=%d wd=%d lk=%d ld=%d cer=%s' % (
+                            vname, crop, filt, min_conf, psm, res['ms'],
+                            (round(res['confidence'], 1) if res['confidence'] is not None else None),
+                            len(text), res.get('words_dropped', 0),
+                            res.get('lines_kept', 0), res.get('lines_dropped', 0),
+                            (round(cer, 4) if cer is not None else None),
+                        ))
 
     with open(os.path.join(output_dir, 'results.csv'), 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=['variant', 'psm', 'ms', 'confidence', 'chars', 'cer'])
+        writer = csv.DictWriter(f, fieldnames=['variant', 'crop', 'filter', 'min_conf', 'psm', 'ms', 'confidence', 'chars', 'words_dropped', 'lines_kept', 'lines_dropped', 'cer'])
         writer.writeheader()
         writer.writerows(rows)
 
