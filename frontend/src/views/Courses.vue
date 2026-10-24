@@ -4,6 +4,12 @@ import { Search, Plus, Edit2, Trash2 } from 'lucide-vue-next'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api'
 
+const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const selectedDays = ref([])
+const startTime = ref('')
+const endTime = ref('')
+const oldSchedule = ref('')
+
 const courses = ref([])
 const search = ref('')
 const loading = ref(false)
@@ -12,6 +18,45 @@ const showModal = ref(false)
 const modalMode = ref('add')
 const form = ref({ id: null, code: '', name: '', section: '', schedule: '' })
 const formError = ref('')
+
+function toggleDay(d) {
+  const idx = selectedDays.value.indexOf(d)
+  if (idx >= 0) {
+    selectedDays.value.splice(idx, 1)
+  } else {
+    selectedDays.value.push(d)
+  }
+}
+
+function parseSchedule(s) {
+  selectedDays.value = []
+  startTime.value = ''
+  endTime.value = ''
+  oldSchedule.value = ''
+  if (!s) return
+  // Try to match: "Mon/Wed 09:00 - 10:30"
+  const m = s.match(/([A-Za-z\/]+)\s+([0-9]{2}:[0-9]{2})\s*-\s*([0-9]{2}:[0-9]{2})/)
+  if (m) {
+    const dayStr = m[1]
+    dayStr.split('/').forEach(d => {
+      const dd = d.trim()
+      if (days.includes(dd)) selectedDays.value.push(dd)
+    })
+    startTime.value = m[2]
+    endTime.value = m[3]
+    return
+  }
+  oldSchedule.value = s
+}
+
+function buildSchedule() {
+  if (selectedDays.value.length === 0) return ''
+  // validate times
+  if (!startTime.value || !endTime.value) throw new Error('Both start and end times required')
+  if (endTime.value <= startTime.value) throw new Error('End time must be later than start time')
+  const dayStr = selectedDays.value.join('/')
+  return dayStr + ' ' + startTime.value + ' - ' + endTime.value
+}
 
 async function fetchCourses() {
   loading.value = true
@@ -33,6 +78,10 @@ async function fetchCourses() {
 function openAdd() {
   modalMode.value = 'add'
   form.value = { id: null, code: '', name: '', section: '', schedule: '' }
+  selectedDays.value = []
+  startTime.value = ''
+  endTime.value = ''
+  oldSchedule.value = ''
   formError.value = ''
   showModal.value = true
 }
@@ -40,6 +89,7 @@ function openAdd() {
 function openEdit(c) {
   modalMode.value = 'edit'
   form.value = { id: c.id, code: c.code || '', name: c.name || '', section: c.section || '', schedule: c.schedule || '' }
+  parseSchedule(c.schedule || '')
   formError.value = ''
   showModal.value = true
 }
@@ -51,13 +101,28 @@ function closeModal() {
 function validate() {
   if (!form.value.code || !form.value.code.trim()) return 'Code is required'
   if (!form.value.name || !form.value.name.trim()) return 'Name is required'
-  return ''
+  try {
+    if (selectedDays.value.length > 0) {
+      if (!startTime.value || !endTime.value) return 'Both start and end times required'
+      if (endTime.value <= startTime.value) return 'End time must be later than start time'
+    }
+    return ''
+  } catch (e) {
+    return e.message
+  }
 }
 
 async function saveCourse() {
   formError.value = validate()
   if (formError.value) return
   try {
+    let scheduleToSend = ''
+    if (selectedDays.value.length > 0) {
+      const dayStr = selectedDays.value.join('/')
+      scheduleToSend = dayStr + ' ' + startTime.value + ' - ' + endTime.value
+    } else {
+      scheduleToSend = ''
+    }
     if (modalMode.value === 'add') {
       const res = await fetch(API_BASE + '/courses/', {
         method: 'POST',
@@ -66,7 +131,7 @@ async function saveCourse() {
           code: form.value.code.trim(),
           name: form.value.name.trim(),
           section: form.value.section ? form.value.section.trim() : '',
-          schedule: form.value.schedule ? form.value.schedule.trim() : ''
+          schedule: scheduleToSend
         })
       })
       if (!res.ok) throw new Error('Failed')
@@ -78,7 +143,7 @@ async function saveCourse() {
           code: form.value.code.trim(),
           name: form.value.name.trim(),
           section: form.value.section ? form.value.section.trim() : '',
-          schedule: form.value.schedule ? form.value.schedule.trim() : ''
+          schedule: scheduleToSend
         })
       })
       if (!res.ok) throw new Error('Failed')
@@ -183,7 +248,15 @@ onMounted(fetchCourses)
           </div>
           <div>
             <label class="block text-sm text-slate-300 mb-1">Schedule</label>
-            <input v-model="form.schedule" class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded text-slate-200" />
+            <div class="flex flex-wrap gap-2 mb-2">
+              <button v-for="d in days" :key="d" type="button" @click="toggleDay(d)" :class="selectedDays.includes(d) ? 'px-2 py-1 rounded bg-cyan-400 text-black' : 'px-2 py-1 rounded bg-slate-800 text-slate-200'">{{ d }}</button>
+            </div>
+            <div class="flex items-center gap-2 mb-2">
+              <input type="time" v-model="startTime" class="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200" />
+              <span class="text-slate-400">-</span>
+              <input type="time" v-model="endTime" class="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200" />
+            </div>
+            <div v-if="oldSchedule" class="text-xs text-slate-400">Current: {{ oldSchedule }}</div>
           </div>
           <div v-if="formError" class="text-red-400 text-sm">{{ formError }}</div>
         </div>
