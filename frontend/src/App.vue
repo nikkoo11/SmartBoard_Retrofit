@@ -11,6 +11,18 @@
       <router-link to="/settings">Settings</router-link>
       <router-link to="/help">Help & Support</router-link>
     </nav>
-    <main class="main"><router-view/></main>
+    <main class="main mx-auto w-full max-w-[1400px]"><router-view/></main>
   </div>
 </template>
+
+<style>
+.sidebar a:hover {
+  background: #1e293b;
+  color: var(--accent);
+}
+.sidebar a.router-link-active {
+  background: rgba(34, 211, 238, 0.15);
+  color: var(--accent);
+  font-weight: 600;
+}
+</style>

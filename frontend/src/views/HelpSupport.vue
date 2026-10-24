@@ -16,10 +16,10 @@ function toggle(i) {
 </script>
 
 <template>
-  <div class="p-4">
+  <div class="mb-4">
     <h1 class="text-2xl font-semibold text-cyan-400 mb-4">Help & Support</h1>
 
-    <div class="card mb-4 p-4">
+    <div class="card mb-4">
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">System workflow (11 steps)</h2>
       <ol class="list-decimal list-inside space-y-2 text-slate-200">
         <li>Teacher selects a course and creates a lesson session <span class="ml-2 px-2 py-0.5 text-xs rounded bg-green-900 text-green-300">Working</span></li>
@@ -36,7 +36,7 @@ function toggle(i) {
       </ol>
     </div>
 
-    <div class="card mb-4 p-4">
+    <div class="card mb-4">
       <h2 class="text-lg font-semibold text-cyan-400 mb-2">ESP32-CAM connection guide</h2>
       <p class="text-slate-400 mb-2">Planned setup. The hardware is not connected in this version.</p>
       <ol class="list-decimal list-inside space-y-1 text-slate-200">
@@ -47,7 +47,7 @@ function toggle(i) {
       </ol>
     </div>
 
-    <div class="card mb-4 p-4">
+    <div class="card mb-4">
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">FAQ</h2>
       <div class="space-y-2">
         <div v-for="(f, i) in faqs" :key="i" class="border border-slate-700 rounded">
@@ -57,7 +57,7 @@ function toggle(i) {
       </div>
     </div>
 
-    <div class="card mb-4 p-4">
+    <div class="card mb-4">
       <h2 class="text-lg font-semibold text-cyan-400 mb-3">Troubleshooting</h2>
       <ul class="space-y-2 text-slate-200">
         <li><strong>Backend not reachable:</strong> Ensure Django server is running on http://127.0.0.1:8000 and CORS allows the frontend.</li>
