@@ -32,6 +32,8 @@ class LessonSession(models.Model):
 class Capture(models.Model):
     session = models.ForeignKey(LessonSession, on_delete=models.CASCADE, related_name='captures')
     image = models.ImageField(upload_to='board_images/')
+    cleaned_image = models.ImageField(upload_to='board_cleaned/', blank=True, null=True)
+    clean_ms = models.PositiveIntegerField(blank=True, null=True)
     extracted_text = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
