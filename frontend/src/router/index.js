@@ -1,7 +1,8 @@
-import { createRouter, createWebHistory } from 'vue-router'
+﻿import { createRouter, createWebHistory } from 'vue-router'
 import Dashboard from '../views/Overview.vue'
 import Courses from '../views/Courses.vue'
 import LessonSessions from '../views/LessonSessions.vue'
+import SessionDetail from '../views/SessionDetail.vue'
 import WhiteboardCapture from '../views/WhiteboardCapture.vue'
 import PdfArchive from '../views/PdfArchive.vue'
 import AiAssistant from '../views/AiAssistant.vue'
@@ -13,6 +14,7 @@ const routes = [
   { path: '/dashboard', component: Dashboard },
   { path: '/courses', component: Courses },
   { path: '/sessions', component: LessonSessions },
+  { path: '/sessions/:id', component: SessionDetail },
   { path: '/capture', component: WhiteboardCapture },
   { path: '/archive', component: PdfArchive },
   { path: '/assistant', component: AiAssistant },
@@ -21,3 +23,4 @@ const routes = [
 ]
 
 export default createRouter({ history: createWebHistory(), routes })
+
