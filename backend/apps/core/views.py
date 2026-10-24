@@ -10,7 +10,7 @@ import cv2
 from .models import Course, LessonSession, Capture, PdfDocument
 from .serializers import CourseSerializer, LessonSessionSerializer, CaptureSerializer, PdfDocumentSerializer
 from .pdf_service import build_session_pdf
-from .ocr_service import run_ocr
+from .ocr_service import run_ocr, run_gemini_ocr
 from .cleaning_service import clean_for_ocr, clean_board_image, find_text_region
 
 
@@ -108,6 +108,32 @@ class CaptureViewSet(viewsets.ModelViewSet):
         if source not in ('original', 'cleaned', 'threshold'):
             return Response({'detail': 'Invalid source.'}, status=status.HTTP_400_BAD_REQUEST)
         cropped = False
+        engine = request.query_params.get('engine', 'tesseract')
+        if engine not in ('tesseract', 'gemini'):
+            return Response({'detail': 'Invalid engine.'}, status=status.HTTP_400_BAD_REQUEST)
+        if engine == 'gemini':
+            if source == 'threshold':
+                return Response({'detail': 'Threshold source is not supported by Gemini OCR.'}, status=status.HTTP_400_BAD_REQUEST)
+            if source == 'cleaned':
+                if not (capture.cleaned_image and os.path.exists(capture.cleaned_image.path)):
+                    return Response({'detail': 'No cleaned image.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                image_path = capture.cleaned_image.path
+            else:
+                if not capture.image or not os.path.exists(capture.image.path):
+                    return Response({'detail': 'Capture has no image.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                image_path = capture.image.path
+            try:
+                result = run_gemini_ocr(image_path)
+            except Exception:
+                return Response({'detail': 'Gemini OCR failed.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            if save and result['text'].strip():
+                capture.extracted_text = result['text']
+                capture.save()
+            saved = bool(save and result['text'].strip())
+            payload = {'source': source, 'psm': None, 'filter': None, 'text': result['text'], 'confidence': None, 'ms': None, 'saved': saved, 'cropped': False, 'min_conf': min_conf, 'chars': len(result['text']), 'words_dropped': 0, 'lines_kept': 0, 'lines_dropped': 0}
+            if not result['text'].strip():
+                payload['detail'] = 'No text was detected.'
+            return Response(payload, status=status.HTTP_200_OK)
         try:
             if source == 'original':
                 img = cv2.imread(capture.image.path, cv2.IMREAD_GRAYSCALE)

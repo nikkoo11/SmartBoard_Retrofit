@@ -81,8 +81,18 @@ def run_ocr(image, psm=6, min_conf=0, filter='line'):
         raise RuntimeError('OCR failed: %s' % exc)
     # confidence computed from the words that were kept
     avg_conf = (sum(kept_confidences) / len(kept_confidences)) if kept_confidences else None
+    ms = int((time.time() - start) * 1000)
+    return {
+        'text': text,
+        'confidence': avg_conf,
+        'ms': ms,
+        'words_dropped': words_dropped,
+        'lines_kept': lines_kept,
+        'lines_dropped': lines_dropped,
+    }
 
-GEMINI_PROMPT = 'Copy ONLY the text written on the whiteboard, exactly as written. Do not add labels, notes, explanations or corrections. Write math in simple one-line form. If something is unreadable, write [unclear].'
+
+GEMINI_PROMPT = 'Copy ONLY the text written on the whiteboard, exactly as written. Do not add labels, notes, explanations or corrections. Write math in simple one-line form using ASCII notation where practical: use "->" for arrows, "^" for exponents, "_" for subscripts, and "sqrt()" for square roots. Keep variable names and symbols as they appear. If something is unreadable, write [unclear].'
 
 
 def run_gemini_ocr(image_path, model='gemini-3.8-flash'):
@@ -115,6 +125,7 @@ def run_gemini_ocr(image_path, model='gemini-3.8-flash'):
                 types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                 GEMINI_PROMPT,
             ],
+            config=types.GenerateContentConfig(automatic_continuation=False),
         )
     except Exception as exc:
         raise RuntimeError('Gemini OCR failed: %s' % exc)
