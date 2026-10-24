@@ -30,19 +30,40 @@ def build_session_pdf(session):
             c.showPage()
             y = height - 72
         try:
-            img_path = cap.image.path
+            cleaned = getattr(cap, 'cleaned_image', None)
+            img_path = None
+            caption = 'Original image (not cleaned)'
+            if cleaned:
+                try:
+                    cleaned_path = cleaned.path
+                except Exception:
+                    cleaned_path = None
+                if cleaned_path and os.path.exists(cleaned_path):
+                    img_path = cleaned_path
+                    caption = 'Cleaned image (gentle)'
+            if img_path is None:
+                img_path = cap.image.path
+                caption = 'Original image (not cleaned)'
             if os.path.exists(img_path):
                 img = ImageReader(img_path)
                 img_w, img_h = img.getSize()
                 max_w = width - 144
-                scale = max_w / img_w if img_w > 0 else 1
+                available_h = y - 72 - 40
+                scale = min(max_w / img_w if img_w > 0 else 1, available_h / img_h if img_h > 0 else 1)
                 draw_w = img_w * scale
                 draw_h = img_h * scale
                 if y - draw_h < 72:
                     c.showPage()
                     y = height - 72
+                    available_h = y - 72 - 40
+                    scale = min(max_w / img_w if img_w > 0 else 1, available_h / img_h if img_h > 0 else 1)
+                    draw_w = img_w * scale
+                    draw_h = img_h * scale
                 c.drawImage(img, 72, y - draw_h, width=draw_w, height=draw_h)
-                y -= draw_h + 12
+                y -= draw_h + 10
+                c.setFont('Helvetica-Oblique', 9)
+                c.drawString(72, y, caption)
+                y -= 16
             else:
                 c.setFont('Helvetica-Oblique', 10)
                 c.drawString(72, y, '(Image file not found)')

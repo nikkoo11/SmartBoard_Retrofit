@@ -17,8 +17,18 @@ const error = ref('')
 const uploadError = ref('')
 const file = ref(null)
 const preview = ref('')
-const enlarged = ref(null)
+const cleaning = ref({})
+const cleanMsg = ref({})
+const cleanError = ref({})
 const extractedDrafts = ref({})
+const enlarged = ref(null)
+const ocrSource = ref({})
+const ocrPsm = ref({})
+const ocrRunning = ref({})
+const ocrMsg = ref({})
+const ocrErr = ref({})
+const ocrConfidence = ref({})
+const ocrMs = ref({})
 const finalizing = ref(false)
 const finalizeMsg = ref('')
 
@@ -66,6 +76,8 @@ async function fetchCaptures(id) {
       captures.value = Array.isArray(data) ? data : (data.results || [])
       captures.value.forEach(c => {
         extractedDrafts.value[c.id] = c.extracted_text || ''
+        if (!ocrSource.value[c.id]) ocrSource.value[c.id] = 'threshold'
+        if (!ocrPsm.value[c.id]) ocrPsm.value[c.id] = 6
       })
     } else {
       captures.value = []
@@ -108,8 +120,8 @@ async function upload() {
   }
 }
 
-function openLarge(c) {
-  enlarged.value = c
+function openLarge(src) {
+  enlarged.value = src
 }
 
 function closeLarge() {
@@ -130,6 +142,64 @@ async function saveExtracted(c) {
   }
 }
 
+async function runOcr(c) {
+  if ((extractedDrafts.value[c.id] || '').trim()) {
+    if (!confirm('Replace existing text with OCR draft?')) return
+  }
+  ocrRunning.value[c.id] = true
+  ocrMsg.value[c.id] = ''
+  ocrErr.value[c.id] = ''
+  ocrConfidence.value[c.id] = null
+  ocrMs.value[c.id] = null
+  try {
+    const src = ocrSource.value[c.id] || 'threshold'
+    const psm = ocrPsm.value[c.id] || 6
+    const res = await fetch(API_BASE + '/captures/' + c.id + '/ocr/?source=' + src + '&psm=' + psm + '&save=0', { method: 'POST' })
+    if (!res.ok) {
+      let detail = 'Cannot reach the backend'
+      try { const d = await res.json(); if (d.detail) detail = d.detail } catch (e) {}
+      ocrErr.value[c.id] = detail
+      return
+    }
+    const data = await res.json()
+    if (!data.text || !String(data.text).trim()) {
+      ocrMsg.value[c.id] = 'No text was detected.'
+    } else {
+      extractedDrafts.value[c.id] = data.text
+      ocrMsg.value[c.id] = 'OCR draft ready. Review it, then press Save.'
+      ocrConfidence.value[c.id] = data.confidence
+      ocrMs.value[c.id] = data.ms
+    }
+  } catch (e) {
+    ocrErr.value[c.id] = 'Cannot reach the backend'
+  } finally {
+    ocrRunning.value[c.id] = false
+  }
+}
+async function cleanCapture(c) {
+  cleaning.value[c.id] = true
+  cleanMsg.value[c.id] = ''
+  cleanError.value[c.id] = ''
+  try {
+    const res = await fetch(API_BASE + '/captures/' + c.id + '/clean/', { method: 'POST' })
+    if (!res.ok) {
+      let detail = 'Cleaning failed'
+      try { const d = await res.json(); if (d.detail) detail = d.detail } catch (e) {}
+      cleanError.value[c.id] = detail
+      return
+    }
+    const data = await res.json()
+    const idx = captures.value.findIndex(x => x.id === c.id)
+    if (idx !== -1) captures.value[idx] = data
+    extractedDrafts.value[data.id] = data.extracted_text || ''
+    if (data.clean_ms != null) cleanMsg.value[data.id] = 'Cleaned in ' + data.clean_ms + ' ms'
+  } catch (e) {
+    console.error('Clean image failed:', e)
+    cleanError.value[c.id] = 'Cannot reach the backend'
+  } finally {
+    cleaning.value[c.id] = false
+  }
+}
 async function deleteCapture(c) {
   if (!confirm('Delete this capture?')) return
   try {
@@ -256,13 +326,47 @@ onMounted(async () => {
       <div v-else-if="captures.length === 0" class="text-slate-400">No captures for this session yet.</div>
       <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div v-for="c in captures" :key="c.id" class="card">
-          <img :src="c.image" class="w-full h-48 object-contain bg-black rounded mb-2 cursor-pointer" @click="openLarge(c)" />
+          <div v-if="c.cleaned_image" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+            <div>
+              <div class="text-xs text-slate-400 mb-1">Original</div>
+              <img :src="c.image" class="w-full h-48 object-contain bg-black rounded cursor-pointer" @click="openLarge(c.image)" />
+            </div>
+            <div>
+              <div class="text-xs text-slate-400 mb-1">Cleaned</div>
+              <img :src="c.cleaned_image" class="w-full h-48 object-contain bg-black rounded cursor-pointer" @click="openLarge(c.cleaned_image)" />
+            </div>
+          </div>
+          <div v-else class="mb-2">
+            <img :src="c.image" class="w-full h-48 object-contain bg-black rounded cursor-pointer" @click="openLarge(c.image)" />
+            <div class="text-xs text-slate-500 mt-1">Not cleaned yet.</div>
+          </div>
+          <div v-if="c.clean_ms != null" class="text-xs text-slate-400 mb-2">Cleaning time: {{ c.clean_ms }} ms</div>
+          <div v-if="cleanMsg[c.id]" class="text-xs text-green-400 mb-2">{{ cleanMsg[c.id] }}</div>
+          <div v-if="cleanError[c.id]" class="text-xs text-red-400 mb-2">{{ cleanError[c.id] }}</div>
           <div class="mb-2">
-            <label class="block text-xs text-slate-400 mb-1">OCR is not connected yet. You can type or edit the text manually.</label>
+            <label class="block text-xs text-slate-400 mb-1">OCR results are a draft and may contain mistakes, especially for handwriting. Please review and edit before saving.</label>
+            <div class="flex flex-wrap items-center gap-2 mb-2">
+              <select v-model="ocrSource[c.id]" class="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 text-sm">
+                <option value="original">Original</option>
+                <option value="cleaned">Cleaned</option>
+                <option value="threshold">OCR-optimized (threshold)</option>
+              </select>
+              <select v-model="ocrPsm[c.id]" class="px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 text-sm">
+                <option :value="6">Single block (6)</option>
+                <option :value="11">Sparse text (11)</option>
+                <option :value="3">Auto (3)</option>
+              </select>
+              <button @click="runOcr(c)" :disabled="ocrRunning[c.id]" class="px-2 py-1 bg-cyan-400 text-black rounded text-sm disabled:opacity-50">{{ ocrRunning[c.id] ? 'Running OCR...' : 'Run OCR' }}</button>
+            </div>
+            <div v-if="ocrMsg[c.id]" class="text-xs text-green-400 mb-1">{{ ocrMsg[c.id] }}</div>
+            <div v-if="ocrConfidence[c.id] != null" class="text-xs text-slate-400 mb-1">Tesseract confidence: {{ ocrConfidence[c.id] }}%</div>
+            <div v-if="ocrMs[c.id] != null" class="text-xs text-slate-400 mb-1">Time: {{ ocrMs[c.id] }} ms</div>
+            <div v-if="ocrErr[c.id]" class="text-xs text-red-400 mb-1">{{ ocrErr[c.id] }}</div>
             <textarea v-model="extractedDrafts[c.id]" class="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 h-24"></textarea>
           </div>
           <div class="flex items-center gap-2">
             <button @click="saveExtracted(c)" class="px-2 py-1 bg-cyan-400 text-black rounded text-sm">Save</button>
+            <button @click="cleanCapture(c)" :disabled="cleaning[c.id]" class="px-2 py-1 bg-cyan-400 text-black rounded text-sm disabled:opacity-50">{{ cleaning[c.id] ? 'Cleaning...' : (c.cleaned_image ? 'Clean again' : 'Clean image') }}</button>
             <button @click="deleteCapture(c)" class="px-2 py-1 bg-red-900/40 text-red-400 rounded text-sm">Delete</button>
           </div>
         </div>
@@ -270,7 +374,7 @@ onMounted(async () => {
     </div>
 
     <div v-if="enlarged" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click="closeLarge">
-      <img :src="enlarged.image" class="max-w-full max-h-full" />
+      <img :src="enlarged" class="max-w-full max-h-full" />
     </div>
   </div>
 </template>
