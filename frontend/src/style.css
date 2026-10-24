@@ -18,4 +18,5 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 input{background:#0f172a;color:var(--text);border:1px solid #1f2a44;padding:.5rem;border-radius:.5rem;}
 table{width:100%;border-collapse:collapse;}
 th,td{padding:.5rem;border-bottom:1px solid #1f2a44;text-align:left;}
-@media(max-width:768px){.sidebar{width:100%;display:flex;flex-wrap:wrap;gap:.5rem;}.layout{flex-direction:column;}}
+.menu-toggle{display:none;position:fixed;top:.75rem;left:.75rem;z-index:30;background:var(--panel);color:var(--text);border:1px solid #1f2a44;padding:.4rem .7rem;border-radius:.5rem;cursor:pointer;}
+@media(max-width:768px){.menu-toggle{display:block;}.sidebar{display:none;width:100%;}.sidebar.open{display:block;position:fixed;top:0;left:0;height:100vh;width:220px;z-index:20;overflow-y:auto;}.layout{flex-direction:column;}.main{padding-top:3.5rem;}}
