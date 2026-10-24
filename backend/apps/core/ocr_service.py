@@ -81,6 +81,50 @@ def run_ocr(image, psm=6, min_conf=0, filter='line'):
         raise RuntimeError('OCR failed: %s' % exc)
     # confidence computed from the words that were kept
     avg_conf = (sum(kept_confidences) / len(kept_confidences)) if kept_confidences else None
-    cleaned = '\n'.join(line for line in text.splitlines() if line.strip() != '')
-    elapsed_ms = int((time.time() - start) * 1000)
-    return {'text': cleaned, 'confidence': avg_conf, 'ms': elapsed_ms, 'words_dropped': words_dropped, 'lines_kept': lines_kept, 'lines_dropped': lines_dropped, 'filter': filter}
+
+GEMINI_PROMPT = 'Copy ONLY the text written on the whiteboard, exactly as written. Do not add labels, notes, explanations or corrections. Write math in simple one-line form. If something is unreadable, write [unclear].'
+
+
+def run_gemini_ocr(image_path, model='gemini-3.8-flash'):
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        raise RuntimeError('GEMINI_API_KEY is not set.')
+    if not image_path or not os.path.exists(image_path):
+        raise RuntimeError('Image file not found: %s' % image_path)
+    try:
+        with open(image_path, 'rb') as f:
+            image_bytes = f.read()
+    except OSError as exc:
+        raise RuntimeError('Could not read image: %s' % exc)
+    if not image_bytes:
+        raise RuntimeError('Image file is empty.')
+    import mimetypes
+    mime_type = mimetypes.guess_type(image_path)[0] or 'image/png'
+    if not mime_type.startswith('image/'):
+        raise RuntimeError('Unsupported image type: %s' % mime_type)
+    try:
+        from google import genai
+        from google.genai import types
+    except Exception as exc:
+        raise RuntimeError('google-genai SDK is not available: %s' % exc)
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                GEMINI_PROMPT,
+            ],
+        )
+    except Exception as exc:
+        raise RuntimeError('Gemini OCR failed: %s' % exc)
+    text = getattr(response, 'text', None)
+    if not text:
+        try:
+            text = response.candidates[0].content.parts[0].text
+        except Exception:
+            text = ''
+    text = (text or '').strip()
+    if not text:
+        raise RuntimeError('Gemini returned an empty response.')
+    return {'text': text, 'engine': 'gemini', 'model': model}
