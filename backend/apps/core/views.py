@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.core.files.base import ContentFile
 from django.conf import settings
+import logging
 import os
 import time
 import cv2
@@ -12,6 +13,8 @@ from .serializers import CourseSerializer, LessonSessionSerializer, CaptureSeria
 from .pdf_service import build_session_pdf
 from .ocr_service import run_ocr, run_gemini_ocr
 from .cleaning_service import clean_for_ocr, clean_board_image, find_text_region
+
+logger = logging.getLogger(__name__)
 
 
 class CourseViewSet(viewsets.ModelViewSet):
@@ -116,21 +119,44 @@ class CaptureViewSet(viewsets.ModelViewSet):
                 return Response({'detail': 'Threshold source is not supported by Gemini OCR.'}, status=status.HTTP_400_BAD_REQUEST)
             if source == 'cleaned':
                 if not (capture.cleaned_image and os.path.exists(capture.cleaned_image.path)):
-                    return Response({'detail': 'No cleaned image.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    return Response({'detail': 'No cleaned image available for this capture.'}, status=status.HTTP_400_BAD_REQUEST)
                 image_path = capture.cleaned_image.path
             else:
                 if not capture.image or not os.path.exists(capture.image.path):
-                    return Response({'detail': 'Capture has no image.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    return Response({'detail': 'Capture original image file is missing.'}, status=status.HTTP_400_BAD_REQUEST)
                 image_path = capture.image.path
+
+            start_gemini = time.time()
             try:
-                result = run_gemini_ocr(image_path)
-            except Exception:
-                return Response({'detail': 'Gemini OCR failed.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                model_param = request.query_params.get('model')
+                kwargs = {'model': model_param} if model_param else {}
+                result = run_gemini_ocr(image_path, **kwargs)
+            except Exception as exc:
+                logger.error('Gemini OCR failed for capture %s: %s', capture.id, exc, exc_info=True)
+                return Response({'detail': f'Gemini OCR failed: {exc}'}, status=status.HTTP_502_BAD_GATEWAY)
+
+            elapsed_ms = int((time.time() - start_gemini) * 1000)
             if save and result['text'].strip():
                 capture.extracted_text = result['text']
                 capture.save()
             saved = bool(save and result['text'].strip())
-            payload = {'source': source, 'psm': None, 'filter': None, 'text': result['text'], 'confidence': None, 'ms': None, 'saved': saved, 'cropped': False, 'min_conf': min_conf, 'chars': len(result['text']), 'words_dropped': 0, 'lines_kept': 0, 'lines_dropped': 0}
+            payload = {
+                'source': source,
+                'psm': None,
+                'filter': None,
+                'text': result['text'],
+                'confidence': None,
+                'ms': elapsed_ms,
+                'saved': saved,
+                'cropped': False,
+                'min_conf': min_conf,
+                'chars': len(result['text']),
+                'words_dropped': 0,
+                'lines_kept': 0,
+                'lines_dropped': 0,
+                'engine': result.get('engine', 'gemini'),
+                'model': result.get('model', 'gemini'),
+            }
             if not result['text'].strip():
                 payload['detail'] = 'No text was detected.'
             return Response(payload, status=status.HTTP_200_OK)

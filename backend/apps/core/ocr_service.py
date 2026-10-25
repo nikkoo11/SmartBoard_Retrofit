@@ -1,4 +1,7 @@
+import logging
+import mimetypes
 import os
+import re
 import time
 
 import cv2
@@ -7,6 +10,19 @@ import pytesseract
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env'))
+
+logger = logging.getLogger(__name__)
+
+
+def _sanitize_error(msg: str, key: str = None) -> str:
+    """Strip API keys and sensitive tokens from error strings before logging/responding."""
+    if not msg:
+        return 'Unknown error'
+    if key and key in msg:
+        msg = msg.replace(key, '[REDACTED]')
+    msg = re.sub(r'key=[A-Za-z0-9_-]{20,}', 'key=[REDACTED]', msg)
+    msg = re.sub(r'AIza[0-9A-Za-z-_]{35}', '[REDACTED]', msg)
+    return msg
 
 
 def run_ocr(image, psm=6, min_conf=0, filter='line'):
@@ -92,43 +108,98 @@ def run_ocr(image, psm=6, min_conf=0, filter='line'):
     }
 
 
-GEMINI_PROMPT = 'Copy ONLY the text written on the whiteboard, exactly as written. Do not add labels, notes, explanations or corrections. Write math in simple one-line form using ASCII notation where practical: use "->" for arrows, "^" for exponents, "_" for subscripts, and "sqrt()" for square roots. Keep variable names and symbols as they appear. If something is unreadable, write [unclear].'
+GEMINI_PROMPT = (
+    'Transcribe EXACTLY what is written on the whiteboard, character for character. '
+    'Do not add, remove, reorder, simplify, or correct anything. Do not explain, label, '
+    'or comment on the content. Do not fill in missing or smudged parts. '
+    'Preserve the original order of equations and block-diagram elements, including '
+    'the direction of every arrow. '
+    'Use ASCII notation: "->" for arrows, "^" for superscripts, "_" for subscripts, '
+    '"sqrt()" for square roots. Write subscripts immediately after the variable with '
+    'no space (e.g., x[n], x_1, y_k). Write superscripts directly after the base or '
+    'exponent (e.g., x^2, e^jw). Keep every variable name, symbol, and number exactly '
+    'as written; do not normalize or rewrite them. '
+    'If a symbol, number, subscript, superscript, or arrow is unreadable or ambiguous, '
+    'write [unclear] and do not guess. Never replace an unclear mark with a plausible '
+    'character. Output only the transcribed text, one line per equation or element, '
+    'with no extra commentary.'
+)
 
 
-def run_gemini_ocr(image_path, model='gemini-3.8-flash'):
+def run_gemini_ocr(image_path, model='gemini-2.0-flash'):
     api_key = os.environ.get('GEMINI_API_KEY')
     if not api_key:
-        raise RuntimeError('GEMINI_API_KEY is not set.')
+        raise RuntimeError('GEMINI_API_KEY is not configured in backend environment.')
     if not image_path or not os.path.exists(image_path):
-        raise RuntimeError('Image file not found: %s' % image_path)
+        raise FileNotFoundError('Image file not found: %s' % image_path)
     try:
         with open(image_path, 'rb') as f:
             image_bytes = f.read()
     except OSError as exc:
         raise RuntimeError('Could not read image: %s' % exc)
     if not image_bytes:
-        raise RuntimeError('Image file is empty.')
-    import mimetypes
+        raise ValueError('Image file is empty.')
+
     mime_type = mimetypes.guess_type(image_path)[0] or 'image/png'
     if not mime_type.startswith('image/'):
-        raise RuntimeError('Unsupported image type: %s' % mime_type)
+        raise ValueError('Unsupported image type: %s' % mime_type)
+
     try:
         from google import genai
-        from google.genai import types
+        from google.genai import types, errors
     except Exception as exc:
-        raise RuntimeError('google-genai SDK is not available: %s' % exc)
-    try:
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=model,
-            contents=[
-                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                GEMINI_PROMPT,
-            ],
-            config=types.GenerateContentConfig(automatic_continuation=False),
-        )
-    except Exception as exc:
-        raise RuntimeError('Gemini OCR failed: %s' % exc)
+        raise ImportError('google-genai SDK is not available: %s' % exc)
+
+    # Resolve candidate models in priority order
+    env_model = os.environ.get('GEMINI_OCR_MODEL')
+    candidate_models = []
+    if env_model:
+        candidate_models.append(env_model)
+    if model and model not in candidate_models:
+        candidate_models.append(model)
+    for fallback in ['gemini-3.1-flash-lite', 'gemini-3.5-flash']:
+        if fallback not in candidate_models:
+            candidate_models.append(fallback)
+
+    client = genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=30000)
+    )
+
+    last_error = None
+    response = None
+    chosen_model = None
+
+    for cand_model in candidate_models:
+        try:
+            logger.info("Attempting Gemini OCR with model: %s", cand_model)
+            response = client.models.generate_content(
+                model=cand_model,
+                contents=[
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    GEMINI_PROMPT,
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    automatic_continuation=False
+                ),
+            )
+            chosen_model = cand_model
+            break
+        except (errors.ClientError, errors.ServerError) as exc:
+            sanitized = _sanitize_error(str(exc), api_key)
+            last_error = sanitized
+            logger.warning("Gemini model '%s' failed: %s", cand_model, sanitized)
+            continue
+        except Exception as exc:
+            sanitized = _sanitize_error(str(exc), api_key)
+            last_error = sanitized
+            logger.warning("Gemini model '%s' failed with error: %s", cand_model, sanitized)
+            continue
+
+    if response is None:
+        raise RuntimeError('Gemini OCR request failed: %s' % (last_error or 'No response'))
+
     text = getattr(response, 'text', None)
     if not text:
         try:
@@ -138,4 +209,5 @@ def run_gemini_ocr(image_path, model='gemini-3.8-flash'):
     text = (text or '').strip()
     if not text:
         raise RuntimeError('Gemini returned an empty response.')
-    return {'text': text, 'engine': 'gemini', 'model': model}
+
+    return {'text': text, 'engine': 'gemini', 'model': chosen_model or model}
