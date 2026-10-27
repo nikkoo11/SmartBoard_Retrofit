@@ -126,6 +126,50 @@ GEMINI_PROMPT = (
 )
 
 
+def _gemini_timeout_ms() -> int:
+    """Resolve the Gemini request timeout in milliseconds.
+
+    Reads GEMINI_OCR_TIMEOUT_MS from the environment. Falls back to a
+    30 s default so a slow or hung model cannot block a request thread
+    indefinitely. The value is clamped to a sane range to guard against
+    misconfiguration.
+    """
+    raw = os.environ.get('GEMINI_OCR_TIMEOUT_MS', '30000')
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 30000
+    if value <= 0:
+        value = 30000
+    return min(value, 600000)
+
+
+def _is_timeout(exc: Exception) -> bool:
+    """Return True when the exception indicates an HTTP request timeout.
+
+    The google-genai SDK surfaces timeouts through httpx (or httpx2)
+    and occasionally through its own APIError wrapper. We detect them by
+    class name so we do not depend on private SDK attributes.
+    """
+    name = type(exc).__name__
+    if name in ('TimeoutException', 'ConnectTimeout', 'ReadTimeout',
+                'WriteTimeout', 'PoolTimeout'):
+        return True
+    try:
+        import httpx
+        if isinstance(exc, httpx.TimeoutException):
+            return True
+    except Exception:
+        pass
+    try:
+        import httpx2
+        if isinstance(exc, httpx2.TimeoutException):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def run_gemini_ocr(image_path, model='gemini-2.0-flash'):
     api_key = os.environ.get('GEMINI_API_KEY')
     if not api_key:
@@ -163,7 +207,7 @@ def run_gemini_ocr(image_path, model='gemini-2.0-flash'):
 
     client = genai.Client(
         api_key=api_key,
-        http_options=types.HttpOptions(timeout=30000)
+        http_options=types.HttpOptions(timeout=_gemini_timeout_ms())
     )
 
     last_error = None
@@ -194,6 +238,10 @@ def run_gemini_ocr(image_path, model='gemini-2.0-flash'):
         except Exception as exc:
             sanitized = _sanitize_error(str(exc), api_key)
             last_error = sanitized
+            # Surface timeouts distinctly so callers can distinguish a
+            # hung request from a model/availability failure.
+            if _is_timeout(exc):
+                last_error = 'Gemini request timed out after %d ms.' % _gemini_timeout_ms()
             logger.warning("Gemini model '%s' failed with error: %s", cand_model, sanitized)
             continue
 

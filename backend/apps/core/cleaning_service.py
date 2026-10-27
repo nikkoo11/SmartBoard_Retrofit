@@ -85,7 +85,7 @@ def _remove_lighting(gray):
 
 
 def _white_point(gray):
-    threshold = np.percentile(gray, 85)
+    threshold = np.percentile(gray, 98)
     out = gray.astype(np.float32)
     out[out >= threshold] = 255.0
     return np.clip(out, 0, 255).astype(np.uint8)

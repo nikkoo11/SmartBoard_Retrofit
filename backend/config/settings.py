@@ -62,13 +62,20 @@ DATABASES = {
 
 
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Manila'
 USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = 'static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# Device (ESP32-CAM) shared token. Read from env; never hardcode or log it.
+DEVICE_TOKEN = os.environ.get('DEVICE_TOKEN', '')
+# How long an armed session stays armed without renewal (minutes).
+DEVICE_SESSION_TIMEOUT_MINUTES = int(os.environ.get('DEVICE_SESSION_TIMEOUT_MINUTES', '120'))
+# Max accepted camera upload size in bytes.
+DEVICE_UPLOAD_MAX_BYTES = int(os.environ.get('DEVICE_UPLOAD_MAX_BYTES', str(10 * 1024 * 1024)))
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -78,12 +85,27 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
 
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        'CSRF_TRUSTED_ORIGINS',
+        'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174',
+    ).split(',')
+    if origin.strip()
+]
+
 INSTALLED_APPS += ['rest_framework','django_filters']
 
 REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
 }
 
 

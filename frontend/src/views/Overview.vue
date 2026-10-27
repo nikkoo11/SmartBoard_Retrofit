@@ -1,70 +1,61 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { BookOpen, Calendar, Image, FileText } from 'lucide-vue-next'
+import { api, request } from '../services/api.js'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api'
-
-const courseCount = ref(0)
+const courseCount  = ref(0)
 const sessionCount = ref(0)
 const captureCount = ref(0)
-const pdfCount = ref(0)
+const pdfCount     = ref(0)
 const statusCounts = ref({ draft: 0, capturing: 0, processing: 0, finalized: 0 })
 const recentSessions = ref([])
-const recentPdfs = ref([])
+const recentPdfs     = ref([])
 const loading = ref(false)
-const error = ref('')
+const error   = ref('')
 
-async function getCount(url) {
+async function getCount(path) {
   try {
-    const res = await fetch(url)
-    if (!res.ok) return 0
-    const data = await res.json()
+    const data = await request(path)
     if (typeof data.count === 'number') return data.count
     if (Array.isArray(data)) return data.length
     if (Array.isArray(data.results)) return data.results.length
     return 0
-  } catch (e) {
-    return 0
-  }
+  } catch { return 0 }
 }
 
-async function fetchList(url) {
+async function fetchList(path) {
   try {
-    const res = await fetch(url)
-    if (!res.ok) return []
-    const data = await res.json()
+    const data = await request(path)
     if (Array.isArray(data)) return data
     if (Array.isArray(data.results)) return data.results
     return []
-  } catch (e) {
-    return []
-  }
+  } catch { return [] }
 }
 
 onMounted(async () => {
   loading.value = true
-  error.value = ''
+  error.value   = ''
   try {
     const [cCount, sCount, capCount, pCount, sDraft, sCapt, sProc, sFin, sessions, pdfs] = await Promise.all([
-      getCount(API_BASE + '/courses/'),
-      getCount(API_BASE + '/sessions/'),
-      getCount(API_BASE + '/captures/'),
-      getCount(API_BASE + '/pdfs/'),
-      getCount(API_BASE + '/sessions/?status=draft'),
-      getCount(API_BASE + '/sessions/?status=capturing'),
-      getCount(API_BASE + '/sessions/?status=processing'),
-      getCount(API_BASE + '/sessions/?status=finalized'),
-      fetchList(API_BASE + '/sessions/'),
-      fetchList(API_BASE + '/pdfs/')
+      getCount('/courses/'),
+      getCount('/sessions/'),
+      getCount('/captures/'),
+      getCount('/pdfs/'),
+      getCount('/sessions/?status=draft'),
+      getCount('/sessions/?status=capturing'),
+      getCount('/sessions/?status=processing'),
+      getCount('/sessions/?status=finalized'),
+      fetchList('/sessions/'),
+      fetchList('/pdfs/')
     ])
-    courseCount.value = cCount
+    courseCount.value  = cCount
     sessionCount.value = sCount
     captureCount.value = capCount
-    pdfCount.value = pCount
+    pdfCount.value     = pCount
     statusCounts.value = { draft: sDraft, capturing: sCapt, processing: sProc, finalized: sFin }
     recentSessions.value = (sessions || []).slice(0, 5)
-    recentPdfs.value = (pdfs || []).slice(0, 3)
-  } catch (e) {
+    recentPdfs.value     = (pdfs    || []).slice(0, 4)
+  } catch {
     error.value = 'Failed to load dashboard data. Is the API running?'
   } finally {
     loading.value = false
@@ -73,115 +64,152 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="p-4">
-    <div class="mb-4">
-      <h1 class="text-2xl font-semibold text-cyan-400">Dashboard</h1>
-      <p class="text-slate-400">Manage lessons and digitized whiteboard notes.</p>
-    </div>
-
-    <div v-if="error" class="mb-4 p-3 bg-red-900/40 border border-red-700 rounded text-red-300">{{ error }}</div>
-    <div v-if="loading" class="text-slate-400 mb-4">Loading...</div>
-
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-      <router-link to="/courses" class="card p-4 hover:bg-slate-900/50">
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="text-slate-400 text-sm">Courses</div>
-            <div class="text-2xl text-cyan-400">{{ courseCount }}</div>
-          </div>
-          <BookOpen class="w-6 h-6 text-cyan-400" />
-        </div>
-      </router-link>
-      <router-link to="/sessions" class="card p-4 hover:bg-slate-900/50">
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="text-slate-400 text-sm">Lesson sessions</div>
-            <div class="text-2xl text-cyan-400">{{ sessionCount }}</div>
-          </div>
-          <Calendar class="w-6 h-6 text-cyan-400" />
-        </div>
-      </router-link>
-      <router-link to="/capture" class="card p-4 hover:bg-slate-900/50">
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="text-slate-400 text-sm">Captures</div>
-            <div class="text-2xl text-cyan-400">{{ captureCount }}</div>
-          </div>
-          <Image class="w-6 h-6 text-cyan-400" />
-        </div>
-      </router-link>
-      <router-link to="/archive" class="card p-4 hover:bg-slate-900/50">
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="text-slate-400 text-sm">PDFs</div>
-            <div class="text-2xl text-cyan-400">{{ pdfCount }}</div>
-          </div>
-          <FileText class="w-6 h-6 text-cyan-400" />
-        </div>
-      </router-link>
-    </div>
-
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-      <div class="card p-3 text-center">
-        <div class="text-slate-400 text-sm">Draft</div>
-        <div class="text-lg text-slate-200">{{ statusCounts.draft }}</div>
+  <div>
+    <!-- Page header -->
+    <div class="page-header flex items-center justify-between">
+      <div>
+        <h1>Dashboard</h1>
+        <p>Overview of your SmartBoard Retrofit system.</p>
       </div>
-      <div class="card p-3 text-center">
-        <div class="text-slate-400 text-sm">Capturing</div>
-        <div class="text-lg text-yellow-300">{{ statusCounts.capturing }}</div>
-      </div>
-      <div class="card p-3 text-center">
-        <div class="text-slate-400 text-sm">Processing</div>
-        <div class="text-lg text-blue-300">{{ statusCounts.processing }}</div>
-      </div>
-      <div class="card p-3 text-center">
-        <div class="text-slate-400 text-sm">Finalized</div>
-        <div class="text-lg text-green-300">{{ statusCounts.finalized }}</div>
+      <div v-if="loading" class="flex items-center gap-2 text-sm" style="color:var(--muted)">
+        <span class="spinner"></span> Loading…
       </div>
     </div>
 
+    <!-- Error -->
+    <div v-if="error" class="alert alert-error">{{ error }}</div>
+
+    <!-- Stat cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <router-link to="/courses" class="card stat-card" style="margin-bottom:0; text-decoration:none; cursor:pointer; transition:border-color .15s;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:.5rem;">
+          <div>
+            <div style="font-size:.75rem; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-bottom:.35rem;">Courses</div>
+            <div style="font-size:2rem; font-weight:700; line-height:1; color:var(--text);">{{ courseCount }}</div>
+          </div>
+          <div style="width:36px; height:36px; border-radius:.5rem; background:color-mix(in srgb,var(--accent) 15%,transparent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <BookOpen style="width:18px; height:18px; color:var(--accent);" />
+          </div>
+        </div>
+      </router-link>
+
+      <router-link to="/sessions" class="card stat-card" style="margin-bottom:0; text-decoration:none; cursor:pointer; transition:border-color .15s;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:.5rem;">
+          <div>
+            <div style="font-size:.75rem; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-bottom:.35rem;">Sessions</div>
+            <div style="font-size:2rem; font-weight:700; line-height:1; color:var(--text);">{{ sessionCount }}</div>
+          </div>
+          <div style="width:36px; height:36px; border-radius:.5rem; background:color-mix(in srgb,var(--accent) 15%,transparent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <Calendar style="width:18px; height:18px; color:var(--accent);" />
+          </div>
+        </div>
+      </router-link>
+
+      <router-link to="/capture" class="card stat-card" style="margin-bottom:0; text-decoration:none; cursor:pointer; transition:border-color .15s;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:.5rem;">
+          <div>
+            <div style="font-size:.75rem; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-bottom:.35rem;">Captures</div>
+            <div style="font-size:2rem; font-weight:700; line-height:1; color:var(--text);">{{ captureCount }}</div>
+          </div>
+          <div style="width:36px; height:36px; border-radius:.5rem; background:color-mix(in srgb,var(--accent) 15%,transparent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <Image style="width:18px; height:18px; color:var(--accent);" />
+          </div>
+        </div>
+      </router-link>
+
+      <router-link to="/archive" class="card stat-card" style="margin-bottom:0; text-decoration:none; cursor:pointer; transition:border-color .15s;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:.5rem;">
+          <div>
+            <div style="font-size:.75rem; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-bottom:.35rem;">PDFs</div>
+            <div style="font-size:2rem; font-weight:700; line-height:1; color:var(--text);">{{ pdfCount }}</div>
+          </div>
+          <div style="width:36px; height:36px; border-radius:.5rem; background:color-mix(in srgb,var(--accent) 15%,transparent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <FileText style="width:18px; height:18px; color:var(--accent);" />
+          </div>
+        </div>
+      </router-link>
+    </div>
+
+    <!-- Status breakdown -->
+    <div class="card mb-6" style="padding:1rem 1.25rem;">
+      <div class="section-title mb-3">Session status breakdown</div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div style="text-align:center;">
+          <div style="font-size:1.375rem; font-weight:700; color:var(--muted);">{{ statusCounts.draft }}</div>
+          <div class="badge badge-draft" style="margin-top:.25rem;">Draft</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:1.375rem; font-weight:700; color:var(--warning);">{{ statusCounts.capturing }}</div>
+          <div class="badge badge-capturing" style="margin-top:.25rem;">Capturing</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:1.375rem; font-weight:700; color:var(--accent);">{{ statusCounts.processing }}</div>
+          <div class="badge badge-processing" style="margin-top:.25rem;">Processing</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:1.375rem; font-weight:700; color:var(--success);">{{ statusCounts.finalized }}</div>
+          <div class="badge badge-finalized" style="margin-top:.25rem;">Finalized</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent data + quick actions -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-      <div class="card p-4">
-        <div class="flex items-center justify-between mb-2">
-          <h2 class="text-lg font-semibold text-cyan-400">Recent Lesson Sessions</h2>
-          <router-link to="/sessions" class="text-cyan-300 text-sm hover:underline">View all</router-link>
+
+      <!-- Recent sessions -->
+      <div class="card" style="margin-bottom:0;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+          <h2 style="font-size:.9375rem;">Recent Lesson Sessions</h2>
+          <router-link to="/sessions" style="font-size:.8125rem; color:var(--accent);">View all →</router-link>
         </div>
-        <div v-if="recentSessions.length === 0" class="text-slate-400">No lesson sessions yet</div>
-        <ul v-else class="space-y-2">
-          <li v-for="s in recentSessions" :key="s.id" class="flex items-center justify-between">
-            <router-link :to="'/sessions/' + s.id" class="text-cyan-300 hover:underline">{{ s.title }}</router-link>
-            <div class="text-slate-400 text-sm">{{ s.course_code }} - {{ s.date }}</div>
+        <div v-if="recentSessions.length === 0" class="empty-state" style="padding:1.5rem 1rem;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span>No sessions yet</span>
+        </div>
+        <ul v-else style="margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:.625rem;">
+          <li v-for="s in recentSessions" :key="s.id" style="display:flex; align-items:center; justify-content:space-between; gap:.75rem;">
+            <div style="min-width:0; flex:1;">
+              <div style="font-size:.875rem; color:var(--text); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ s.title }}</div>
+              <div style="font-size:.75rem; color:var(--muted); margin-top:.125rem;">{{ s.course_code ? s.course_code + ' · ' : '' }}{{ s.date }}</div>
+            </div>
+            <div style="flex-shrink:0;">
+              <span :class="'badge badge-' + s.status">{{ s.status }}</span>
+            </div>
           </li>
         </ul>
       </div>
-      <div class="card p-4">
-        <div class="flex items-center justify-between mb-2">
-          <h2 class="text-lg font-semibold text-cyan-400">Recent PDFs</h2>
-          <router-link to="/archive" class="text-cyan-300 text-sm hover:underline">View all</router-link>
-        </div>
-        <div v-if="recentPdfs.length === 0" class="text-slate-400">No PDFs yet</div>
-        <ul v-else class="space-y-2">
-          <li v-for="p in recentPdfs" :key="p.id" class="flex items-center justify-between">
-            <span class="text-slate-200">{{ p.session_title }}</span>
-            <a :href="p.file" target="_blank" class="text-cyan-300 hover:underline text-sm">View</a>
-          </li>
-        </ul>
-      </div>
-    </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-      <div class="card p-4">
-        <h2 class="text-lg font-semibold text-cyan-400 mb-2">Device Status</h2>
-        <div class="flex items-center gap-2 mb-1">
-          <span class="px-2 py-0.5 rounded text-xs bg-slate-700 text-slate-300">ESP32-CAM: Not connected</span>
+      <!-- Quick actions + device status -->
+      <div style="display:flex; flex-direction:column; gap:1rem;">
+        <div class="card" style="margin-bottom:0;">
+          <h2 style="font-size:.9375rem; margin-bottom:.75rem;">Quick Actions</h2>
+          <div style="display:flex; flex-wrap:wrap; gap:.5rem;">
+            <router-link to="/sessions" class="btn btn-primary btn-sm">+ New Session</router-link>
+            <router-link to="/capture" class="btn btn-secondary btn-sm">Open Capture</router-link>
+            <router-link to="/archive" class="btn btn-secondary btn-sm">PDF Archive</router-link>
+          </div>
         </div>
-        <div class="text-sm text-slate-400">Hardware capture is not connected yet.</div>
-      </div>
-      <div class="card p-4">
-        <h2 class="text-lg font-semibold text-cyan-400 mb-2">Quick Actions</h2>
-        <div class="flex flex-wrap gap-2">
-          <router-link to="/sessions" class="px-3 py-2 bg-cyan-400 text-black rounded">New Lesson Session</router-link>
-          <router-link to="/capture" class="px-3 py-2 bg-slate-700 text-slate-200 rounded">Open Whiteboard Capture</router-link>
+
+        <div class="card" style="margin-bottom:0;">
+          <h2 style="font-size:.9375rem; margin-bottom:.75rem;">Device Status</h2>
+          <div style="display:flex; align-items:center; gap:.625rem;">
+            <span style="width:8px; height:8px; border-radius:50%; background:#475569; flex-shrink:0;"></span>
+            <span style="font-size:.875rem; color:var(--muted);">ESP32-CAM — not connected</span>
+          </div>
+          <div style="font-size:.8rem; color:var(--muted); margin-top:.5rem;">Hardware capture unavailable. Use manual image upload.</div>
+        </div>
+
+        <div v-if="recentPdfs.length > 0" class="card" style="margin-bottom:0;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:.75rem;">
+            <h2 style="font-size:.9375rem;">Recent PDFs</h2>
+            <router-link to="/archive" style="font-size:.8125rem; color:var(--accent);">View all →</router-link>
+          </div>
+          <ul style="margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:.4rem;">
+            <li v-for="p in recentPdfs" :key="p.id" style="display:flex; align-items:center; justify-content:space-between; gap:.5rem;">
+              <span style="font-size:.875rem; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ p.session_title }}</span>
+              <a :href="p.file" target="_blank" style="font-size:.8125rem; color:var(--accent); flex-shrink:0;">View →</a>
+            </li>
+          </ul>
         </div>
       </div>
     </div>

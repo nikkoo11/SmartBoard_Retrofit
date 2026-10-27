@@ -110,3 +110,66 @@ def build_session_pdf(session):
     pdf_bytes = buffer.getvalue()
     buffer.close()
     return pdf_bytes
+
+
+def build_capture_pdf(capture):
+    from io import BytesIO
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.utils import ImageReader
+    import os
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    y = height - 72
+    c.setFont('Helvetica-Bold', 16)
+    c.drawString(72, y, 'SmartBoard Capture Report')
+    y -= 30
+    c.setFont('Helvetica', 12)
+    session = capture.session
+    c.drawString(72, y, 'Course: %s - %s' % (getattr(session.course, 'code', ''), getattr(session.course, 'name', '')))
+    y -= 18
+    c.drawString(72, y, 'Session: %s' % session.title)
+    y -= 18
+    c.drawString(72, y, 'Date: %s' % session.date)
+    y -= 40
+    try:
+        cleaned = getattr(capture, 'cleaned_image', None)
+        img_path = None
+        if cleaned:
+            try:
+                cleaned_path = cleaned.path
+            except Exception:
+                cleaned_path = None
+            if cleaned_path and os.path.exists(cleaned_path):
+                img_path = cleaned_path
+        if img_path is None and capture.image:
+            img_path = capture.image.path
+        if img_path and os.path.exists(img_path):
+            img = ImageReader(img_path)
+            img_w, img_h = img.getSize()
+            max_w = width - 144
+            scale = min(max_w / img_w if img_w > 0 else 1, 1.0)
+            draw_w = img_w * scale
+            draw_h = img_h * scale
+            c.drawImage(img, 72, y - draw_h, width=draw_w, height=draw_h)
+            y -= draw_h + 16
+    except Exception:
+        pass
+    c.setFont('Helvetica', 10)
+    text = capture.extracted_text if capture.extracted_text and capture.extracted_text.strip() else '(No text extracted)'
+    text_obj = c.beginText(72, y)
+    text_obj.setFont('Helvetica', 10)
+    for line in text.splitlines() or ['']:
+        text_obj.textLine(line)
+        y -= 12
+        if y < 72:
+            c.drawText(text_obj)
+            c.showPage()
+            text_obj = c.beginText(72, height - 72)
+            y = height - 72
+    c.drawText(text_obj)
+    c.save()
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes

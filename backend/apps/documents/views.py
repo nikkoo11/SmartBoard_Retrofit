@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.db.models import Count
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from .models import BoardRecord
@@ -18,7 +18,7 @@ def health(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def dashboard_summary(request):
     total = BoardRecord.objects.count()
     latest = BoardRecord.objects.first()
@@ -32,7 +32,7 @@ def dashboard_summary(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def camera_status(request):
     return Response({'connected': False, 'status': 'disconnected', 'message': 'Camera not connected.'})
 
@@ -53,7 +53,7 @@ class BoardRecordViewSet(viewsets.ModelViewSet):
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def upload_image(request):
     file = request.FILES.get('image')
     if not file:
@@ -68,7 +68,7 @@ def upload_image(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def analytics(request):
     days = int(request.query_params.get('days', 7))
     since = timezone.now() - timedelta(days=days)
